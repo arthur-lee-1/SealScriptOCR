@@ -1,281 +1,158 @@
 # 系统设计
 
-## 1. 总体架构
+SealScriptOCR 采用小型、模块化的 PyTorch 工程设计。每个模块只负责一件事：加载数据、预处理图像、构建模型、训练、评估或推理。
 
-本系统采用模块化的深度学习图像分类工程结构。
+## 架构
 
-系统整体流程如下：
+```text
+ImageFolder 数据集
+      |
+      v
+AncientCharPreprocess
+      |
+      v
+DataLoader
+      |
+      v
+SimpleCNN / ResNet18
+      |
+      v
+train_one_epoch / evaluate
+      |
+      v
+checkpoint + training_plot + label_map
+      |
+      v
+单图推理
+```
 
-    数据准备
-        ↓
-    数据加载
-        ↓
-    模型构建
-        ↓
-    模型训练
-        ↓
-    模型评估
-        ↓
-    模型保存
-        ↓
-    单图推理
-        ↓
-    结果可视化
+## 仓库结构
 
----
+```text
+src/
+├── config.py
+├── train.py
+├── infer.py
+├── datasets/
+│   └── mnist_dataset.py
+├── models/
+│   ├── simple_cnn.py
+│   └── resnet18_mnist.py
+└── utils/
+    ├── seed.py
+    └── train_eval.py
+```
 
-## 2. 项目结构
+## 模块说明
 
-    single_char_recognition/
-    ├── data/
-    ├── checkpoints/
-    ├── outputs/
-    ├── docs/
-    ├── src/
-    │   ├── datasets/
-    │   │   └── mnist_dataset.py
-    │   ├── models/
-    │   │   ├── simple_cnn.py
-    │   │   └── resnet18_mnist.py
-    │   ├── utils/
-    │   │   ├── train_eval.py
-    │   │   ├── metrics.py
-    │   │   ├── visualize.py
-    │   │   └── seed.py
-    │   ├── config.py
-    │   ├── train.py
-    │   ├── infer.py
-    │   └── main.py
-    ├── requirements.txt
-    └── README.md
+### 配置模块
 
----
+文件：`src/config.py`
 
-## 3. 模块设计
+存放训练和推理共用的实验参数：
 
-### 3.1 配置模块
-
-**文件：** `src/config.py`
-
-该模块用于存放项目中的统一配置项，例如：
-
+- 数据集路径
+- 输入图像尺寸
+- 模型名称
 - batch size
 - 学习率
-- epoch 数
+- 训练轮数
+- 权重保存路径
 - 运行设备
-- 图像尺寸
-- 类别数
-- 模型保存路径
-- 随机种子
 
-**作用：**
+### 数据集模块
 
-- 集中管理超参数
-- 避免硬编码
-- 简化后续数据集替换
+文件：`src/datasets/mnist_dataset.py`
 
----
+主要入口：
 
-### 3.2 数据集模块
+```python
+get_custom_chars_loaders(data_root, batch_size, image_size, num_workers)
+```
 
-**文件：** `src/datasets/mnist_dataset.py`
+返回内容：
 
-该模块负责：
+- `train_loader`
+- `val_loader`
+- `test_loader`
+- `label_map`
 
-- 下载 MNIST
-- 应用图像变换
-- 构建训练和测试 DataLoader
+该加载器会将 `label_map.json` 写入 `data_root`，方便推理时把类别 ID 映射回可读标签。
 
-**当前预处理流程：**
+### 预处理模块
 
-- `ToTensor()`
-- `Normalize((0.1307,), (0.3081,))`
+类：`AncientCharPreprocess`
 
-**未来扩展：**
+流程：
 
-后续可以替换为：
+1. 转为灰度图。
+2. 自动对比度增强。
+3. 中值滤波。
+4. 保持长宽比缩放。
+5. 填充到正方形画布。
+6. 再次自动对比度增强。
+7. 转为张量并归一化到约 `[-1, 1]`。
 
-- `ImageFolder`
-- 面向小篆单字图像的自定义 Dataset 类
+该流程刻意保持保守。对于秦简牍动物字形，强数据增强或二值化应在人工检查图像后再加入。
 
----
+### 模型模块
 
-### 3.3 模型模块
+文件：
 
-#### 3.3.1 SimpleCNN
+- `src/models/simple_cnn.py`
+- `src/models/resnet18_mnist.py`
 
-**文件：** `src/models/simple_cnn.py`
+`SimpleCNN` 是最快的基线模型。它当前假设输入为 `28 x 28`，因为分类头中包含固定的 `64 * 7 * 7` 线性层输入尺寸。
 
-这是一个轻量级 CNN，用于快速验证训练流程。
+`ResNet18` 将第一层卷积替换为单通道输入层，并按数据集类别数重建最后的分类层。
 
-推荐结构：
+### 训练与评估模块
 
-    Conv -> ReLU -> MaxPool -> Conv -> ReLU -> MaxPool -> Fully Connected -> Output
+文件：`src/utils/train_eval.py`
 
-**作用：**
+函数：
 
-- 结构简单，便于理解
-- 易于调试
-- 适合初始实验
+- `train_one_epoch`
+- `evaluate`
+- `save_model`
+- `plot_metrics`
 
-#### 3.3.2 面向 MNIST 的 ResNet18
+训练使用：
 
-**文件：** `src/models/resnet18_mnist.py`
+- `torch.nn.functional.cross_entropy`
+- Adam 优化器
+- 验证集准确率作为最优权重保存依据
 
-这是一个适配 MNIST 的 ResNet18 模型。
+### 推理模块
 
-需要进行的修改：
+文件：`src/infer.py`
 
-- 将第一层卷积输入通道从 3 改为 1
-- 将最后全连接层输出维度改为 10
+当前命令：
 
-**作用：**
+```bash
+python src/infer.py --image path/to/image.png
+```
 
-- 提供更强的基线模型
-- 为后续迁移到更复杂的单字数据集做准备
+推理会读取：
 
----
+- `Config.model_name` 中的模型结构
+- `Config.save_path` 中的权重
+- `Config.data_root/label_map.json` 中的标签映射
 
-### 3.4 训练与评估模块
+## 输出产物
 
-**文件：** `src/utils/train_eval.py`
+| 路径 | 含义 |
+| --- | --- |
+| `checkpoints/best_model.pth` | 最优模型权重 |
+| `outputs/training_plot.png` | 损失和准确率曲线 |
+| `data/label_map.json` | 类别名到索引的映射 |
 
-该模块应包含可复用的训练与评估函数。
+## 扩展点
 
-典型函数包括：
+推荐的后续改动：
 
-- `train_one_epoch()`
-- `evaluate()`
-
-**职责：**
-
-- 计算训练损失
-- 更新模型参数
-- 在验证集或测试集上进行推理
-- 统计评估指标
-
----
-
-### 3.5 指标模块
-
-**文件：** `src/utils/metrics.py`
-
-该模块用于计算模型评估指标。
-
-当前指标：
-
-- Accuracy（准确率）
-
-未来可选扩展指标：
-
-- Precision（精确率）
-- Recall（召回率）
-- F1-score
-- Confusion Matrix（混淆矩阵）
-
----
-
-### 3.6 可视化模块
-
-**文件：** `src/utils/visualize.py`
-
-该模块用于生成以下图形化结果：
-
-- 训练损失曲线
-- 验证准确率曲线
-- 混淆矩阵图
-
-生成的图像建议保存在 `outputs/` 目录下。
-
----
-
-### 3.7 推理模块
-
-**文件：** `src/infer.py`
-
-该模块用于加载训练好的模型权重，并对单张图像进行预测。
-
-期望命令格式：
-
-    python src/infer.py --img path/to/image.png --weights checkpoints/best_model.pth
-
-期望输出内容：
-
-- 预测标签
-- 置信度
-- 可选 top-k 结果
-
----
-
-## 4. 数据流设计
-
-训练过程中的数据流如下：
-
-    原始 MNIST 图像
-        ↓
-    图像变换
-        ↓
-    Tensor 批数据
-        ↓
-    模型前向传播
-        ↓
-    损失计算
-        ↓
-    反向传播
-        ↓
-    优化器更新
-
-推理过程中的数据流如下：
-
-    单张输入图像
-        ↓
-    预处理
-        ↓
-    模型前向传播
-        ↓
-    Softmax / 概率计算
-        ↓
-    预测标签
-
----
-
-## 5. 设计原则
-
-本项目遵循以下设计原则：
-
-1. **模块化**
-   不同功能拆分为不同模块。
-
-2. **清晰性**
-   项目结构应易于阅读和理解。
-
-3. **可扩展性**
-   框架应支持后续替换数据集和模型。
-
-4. **可复用性**
-   训练、评估等核心逻辑应可复用。
-
-5. **渐进式开发**
-   从简单模型和简单数据集开始，逐步演进。
-
----
-
-## 6. 面向未来迁移的设计
-
-当前系统有意按可迁移架构设计，以便后续扩展到小篆单字识别任务。
-
-从 MNIST 迁移到自定义单字数据集时，主要需要修改以下部分：
-
-- 数据加载逻辑
-- 类别数
-- 标签映射
-- 图像预处理
-- 模型输出维度
-
-而以下部分可基本保持不变：
-
-- 训练循环
-- 模型保存
-- 模型评估
-- 推理逻辑
-
+- 用 argparse 替代纯配置文件工作流。
+- 增加 `evaluate.py` 输出测试集指标。
+- 增加混淆矩阵和每类准确率。
+- 增加批量推理。
+- 为每次实验增加元数据日志。

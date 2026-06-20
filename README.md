@@ -1,284 +1,235 @@
-# 基于深度学习的小篆汉字图像识别系统（CNN分类）
+# SealScriptOCR
 
-本项目面向“小篆汉字图像识别”任务，采用卷积神经网络（CNN）将小篆字符识别转化为**多类别图像分类**问题，提供从数据集组织、训练评估到模型保存与推理的完整流程，并支持命令行进行单图识别（可扩展简单界面）。
+SealScriptOCR 是一个基于 PyTorch 的单字图像分类项目，面向小篆、古文字或其他单字符图像识别任务。项目提供从数据集检查、标签映射生成、模型训练、评估曲线保存到单张图片推理的完整最小闭环。
 
----
+当前实现聚焦“单张图像 -> 单个类别标签”的分类问题，不包含文本检测、整行 OCR、多字符序列识别或图形界面。
 
-## 1. 功能特性
+## Highlights
 
-- 支持不少于 20 类小篆汉字的图像分类（类别数可扩展）
-- 数据预处理：尺寸统一、灰度化/归一化（训练阶段自动完成）
-- 数据增强：随机旋转、平移、缩放、噪声等（可配置）
-- 模型训练：交叉熵损失（CrossEntropyLoss）、Accuracy评估
-- 结果分析：支持输出混淆矩阵、训练/验证曲线（可选）
-- 部署推理：命令行输入图片路径进行识别，输出Top-1/Top-k结果
+- **自定义字符数据集**：使用 `torchvision.datasets.ImageFolder` 读取 `train/val/test` 目录。
+- **古文字预处理**：灰度化、自动对比度、简单中值滤波、等比例缩放并居中填充。
+- **两种模型骨干**：轻量 `SimpleCNN` 与单通道输入版 `ResNet18`。
+- **训练闭环完整**：训练、验证、最佳权重保存、Loss/Accuracy 曲线输出。
+- **标签可追踪**：训练时自动生成 `label_map.json`，推理时显示真实类别名。
+- **脚本简单透明**：核心参数集中在 `src/config.py`，适合教学、实验和二次开发。
 
----
+## Project Structure
 
-## 2. 环境要求
+```text
+SealScriptOCR/
+├── data/                       # 数据集根目录，需包含 train/val/test
+├── checkpoints/                # 训练权重输出目录
+├── outputs/                    # 训练曲线等输出文件
+├── scripts/
+│   ├── check_dataset.py        # 检查各类别样本数量
+│   └── gen_label_map.py        # 根据 train 目录生成标签映射
+├── src/
+│   ├── config.py               # 训练与推理配置
+│   ├── train.py                # 训练入口
+│   ├── infer.py                # 单图推理入口
+│   ├── datasets/
+│   │   └── mnist_dataset.py    # MNIST 与自定义字符数据加载
+│   ├── models/
+│   │   ├── simple_cnn.py
+│   │   └── resnet18_mnist.py
+│   └── utils/
+│       ├── seed.py
+│       └── train_eval.py
+├── requirements.txt
+└── README.md
+```
 
-- Python >= 3.9（建议 3.10/3.11）
-- PyTorch >= 2.0
+## Requirements
+
+- Python 3.9+
+- PyTorch
 - torchvision
-- numpy, pandas
-- opencv-python 或 pillow
-- matplotlib（可选：画曲线）
-- scikit-learn（可选：混淆矩阵）
+- Pillow
+- matplotlib
+- numpy
+- scikit-learn
+- tqdm
 
----
-
-## 3. 安装与运行
-
-### 3.1 克隆项目
-
-```bash
-git clone <your-repo-url>.git
-cd seal-script-recognition
-```
-
-### 3.2 创建虚拟环境（推荐）
-
-```bash
-conda create -n sealscript python=3.10 -y
-conda activate sealscript
-```
-
-### 3.3 安装依赖
-
-方式A：使用 requirements.txt（推荐）
+安装依赖：
 
 ```bash
 pip install -r requirements.txt
 ```
 
-方式B：手动安装
+如果需要 GPU，请根据你的 CUDA 版本先安装匹配的 PyTorch，再安装其余依赖。详见 PyTorch 官方安装说明。
 
-```bash
-pip install torch torchvision numpy opencv-python pillow matplotlib scikit-learn
-```
+## Dataset
 
----
+自定义数据集采用 ImageFolder 目录结构。目录名即类别名：
 
-## 4. 数据集准备（重要）
-
-### 4.1 数据规模要求（项目要求）
-
-- 类别数：不少于 **20 类**
-- 每类样本：不少于 **20 张**
-- 图片可来自碑刻、拓片、字典扫描、截图等
-- 允许存在一定噪声，但建议尽量清晰可辨
-
-### 4.2 数据组织结构（推荐：ImageFolder风格）
-
-将数据按类别文件夹存放（文件夹名=类别标签），示例：
-
-```
+```text
 data/
-  sealscript_20/
-    train/
-      王/
-        0001.png
-        0002.png
-      山/
-        0001.png
-    val/
-      王/
-      山/
-    test/
-      王/
-      山/
+├── train/
+│   ├── 日/
+│   │   ├── 0001.png
+│   │   └── 0002.png
+│   └── 月/
+│       └── 0001.png
+├── val/
+│   ├── 日/
+│   └── 月/
+└── test/
+    ├── 日/
+    └── 月/
 ```
 
-> 说明
+支持的常见图片格式包括 `png`、`jpg`、`jpeg`、`bmp`、`webp`。
 
-- 若你没有单独的 `val/test`，代码也可支持从 `train` 中按比例划分（取决于你的实现）。
-- 类别名可以是汉字（如“山”“王”），也可以是编码（如 `shan`、`wang`），但需保持一致。
+建议：
 
-### 4.3 图片规范建议
+- 每个 split 中保持类别集合一致。
+- 每类尽量准备足够样本，少样本类别容易过拟合。
+- 单张图片最好只包含一个字符主体。
+- 背景、尺寸和笔画颜色越稳定，训练越容易收敛。
 
-- 格式：png/jpg均可
-- 建议背景尽量统一（白底黑字或黑底白字）
-- 若底色不一致，可在预处理里做二值化/反色（可选）
-
----
-
-## 5. 项目结构（示例）
-
-你可以按以下结构组织代码（README可直接配合此结构使用）：
-
-```
-.
-├── data/
-│   └── sealscript_20/
-│       ├── train/
-│       ├── val/
-│       └── test/
-├── checkpoints/
-│   └── best.pth
-├── outputs/
-│   ├── logs/
-│   ├── curves.png
-│   └── confusion_matrix.png
-├── src/
-│   ├── train.py
-│   ├── infer.py
-│   ├── dataset.py
-│   ├── model.py
-│   └── utils.py
-├── requirements.txt
-└── README.md
-```
-
-> 如果你当前项目结构不同，只要将下面的命令中的路径改为你的实际路径即可。
-
----
-
-## 6. 训练（Training）
-
-### 6.1 基本训练命令
+检查数据集数量：
 
 ```bash
-python src/train.py \
-  --data_dir data/sealscript_20 \
-  --img_size 128 \
-  --batch_size 32 \
-  --epochs 50 \
-  --lr 1e-3 \
-  --num_workers 4 \
-  --model resnet18 \
-  --save_dir checkpoints
+python scripts/check_dataset.py
 ```
 
-### 6.2 常用参数说明
-
-- `--data_dir`：数据集根目录（包含 train/val/test）
-- `--img_size`：输入图片尺寸（统一缩放到 img_size × img_size）
-- `--model`：模型类型（如 `lenet` / `simple_cnn` / `resnet18`）
-- `--epochs`：训练轮数
-- `--lr`：学习率
-- `--save_dir`：模型保存目录（保存 best.pth / last.pth 等）
-- `--augment`：开启数据增强（若实现支持）
-- `--seed`：随机种子，保证可复现
-
----
-
-## 7. 评估（Evaluation）
-
-### 7.1 在测试集上评估准确率
+手动生成标签映射：
 
 ```bash
-python src/train.py \
-  --data_dir data/sealscript_20 \
-  --eval_only \
-  --ckpt checkpoints/best.pth
+python scripts/gen_label_map.py
 ```
 
-### 7.2 混淆矩阵（可选）
+训练脚本也会自动在 `data/label_map.json` 写入标签映射。
 
-如果代码支持：
+## Configuration
+
+主要参数位于 `src/config.py`：
+
+```python
+class Config:
+    seed = 42
+    batch_size = 512
+    lr = 1e-3
+    epochs = 100
+    data_root = "data"
+    num_classes = 4
+    image_size = 28
+    model_name = "simple_cnn"  # simple_cnn or resnet18
+    num_workers = 0
+    save_path = "checkpoints/best_model.pth"
+```
+
+常用修改项：
+
+- `data_root`：数据集根目录，默认读取 `data/train`、`data/val`、`data/test`。
+- `model_name`：选择 `simple_cnn` 或 `resnet18`。
+- `image_size`：输入图片尺寸。
+- `batch_size` / `epochs` / `lr`：训练超参数。
+- `save_path`：最佳模型权重保存位置。
+
+注意：当前 `SimpleCNN` 的全连接层按 `image_size = 28` 设计。如果需要使用其他输入尺寸，建议选择 `resnet18`，或同步调整 `src/models/simple_cnn.py` 中的分类头尺寸。
+
+## Training
+
+确认 `data/train`、`data/val`、`data/test` 准备完成后运行：
 
 ```bash
-python src/train.py \
-  --data_dir data/sealscript_20 \
-  --eval_only \
-  --ckpt checkpoints/best.pth \
-  --plot_cm \
-  --cm_out outputs/confusion_matrix.png
+python src/train.py
 ```
 
----
+训练过程会：
 
-## 8. 推理（Inference / Deploy）
+1. 读取 `src/config.py` 配置。
+2. 加载自定义字符数据集。
+3. 根据 `train` 目录生成 `data/label_map.json`。
+4. 按验证集准确率保存最佳模型到 `checkpoints/best_model.pth`。
+5. 输出训练曲线到 `outputs/training_plot.png`。
 
-### 8.1 单张图片识别（命令行）
+训练完成后，你应该看到类似输出：
+
+```text
+Training finished. Best val acc: 0.9500. Model saved to checkpoints/best_model.pth
+```
+
+## Inference
+
+使用训练好的权重对单张图片推理：
 
 ```bash
-python src/infer.py \
-  --ckpt checkpoints/best.pth \
-  --img_path demo/unknown.png \
-  --img_size 128 \
-  --topk 5
+python src/infer.py --image path/to/image.png
 ```
 
-输出示例：
+推理脚本会读取：
 
-```
-Top-1: 山 (0.83)
-Top-5:
-  山 0.83
-  川 0.07
-  水 0.03
-  ...
+- 模型结构：`Config.model_name`
+- 权重路径：`Config.save_path`
+- 标签映射：`Config.data_root/label_map.json`
+
+输出包含预测类别和每个类别的概率。
+
+如果不传入 `--image`，脚本会从配置的数据集测试集中取第一个样本做演示推理。
+
+## Model Notes
+
+### SimpleCNN
+
+轻量卷积网络，适合快速验证流程和小尺寸输入。默认输入为单通道 `28 x 28` 图片。
+
+### ResNet18
+
+基于 torchvision ResNet18，第一层卷积已改为支持单通道输入，分类头会根据数据集类别数重建。适合更复杂或更大尺寸的字符图像实验。
+
+## Outputs
+
+默认输出文件：
+
+```text
+checkpoints/best_model.pth     # 验证集准确率最高的模型权重
+outputs/training_plot.png      # Loss 与 Accuracy 曲线
+data/label_map.json            # 类别名到类别索引的映射
 ```
 
-### 8.2 批量图片识别（可选）
+`label_map.json` 示例：
+
+```json
+{
+  "日": 0,
+  "月": 1,
+  "山": 2,
+  "水": 3
+}
+```
+
+## Development Roadmap
+
+- 增加命令行参数，减少对 `src/config.py` 的手动修改。
+- 增加测试集评估入口与混淆矩阵输出。
+- 增加数据增强策略，如随机旋转、平移、缩放和轻微噪声。
+- 支持批量推理与 CSV 结果导出。
+- 为不同输入尺寸提供更稳健的 CNN 分类头。
+
+## Troubleshooting
+
+### 未找到 `data/train`
+
+请确认 `Config.data_root` 指向的数据目录包含 `train`、`val`、`test` 三个子目录。
+
+### 推理类别显示为数字
+
+通常是缺少 `label_map.json`。先运行训练脚本，或执行：
 
 ```bash
-python src/infer.py \
-  --ckpt checkpoints/best.pth \
-  --img_dir demo/images \
-  --out_csv outputs/predictions.csv
+python scripts/gen_label_map.py
 ```
 
----
+### 修改 `image_size` 后 `SimpleCNN` 报维度错误
 
-## 9. 结果分析建议（写论文/报告可用）
+`SimpleCNN` 当前按 `28 x 28` 输入设计。请将 `image_size` 改回 `28`，或改用 `model_name = "resnet18"`。
 
-常见错误来源：
+### 训练集准确率高但验证集低
 
-1. **类间字形相似**：如某些部件/笔画结构高度相似，模型易混淆
-2. **样本不足导致过拟合**：每类样本过少时，训练集准确率高但测试集下降
-3. **噪声与形变**：拓片裂纹、墨迹不均、倾斜拉伸、背景纹理
-4. **数据分布不一致**：训练集与测试集来源不同（不同书写风格/扫描质量）
+常见原因是样本过少、类别不平衡、训练轮数过多或训练/验证分布不一致。优先检查每类样本数量，并增加数据增强或补充样本。
 
-改进方向：
+## License
 
-- 扩充数据集、做更强的数据增强
-- 使用更强的骨干网络（ResNet34/50、EfficientNet等）
-- 引入度量学习/对比学习以提高细粒度区分能力
-- 做更专业的预处理（反色、二值化、去噪、倾斜校正、形态学操作）
-
----
-
-## 10. 常见问题（FAQ）
-
-### Q1：为什么训练准确率很高但测试准确率低？
-
-A：数据量小、增强不足或训练轮数过多导致过拟合。建议：
-
-- 增加数据增强
-- 减少模型复杂度或使用正则化（Dropout/Weight Decay）
-- 使用早停（Early Stopping）
-- 增加每类样本数量
-
-### Q2：类别文件夹是中文会不会有问题？
-
-A：一般不会。若在Windows环境出现编码/路径问题，可改为拼音或数字标签。
-
-### Q3：必须灰度图吗？
-
-A：不必须。小篆多为黑白图，灰度可降低冗余信息；若使用ResNet等预训练模型，常见做法是复制灰度到3通道或直接读RGB并统一处理。
-
----
-
-## 11. 参考实现建议（你可以在代码里体现）
-
-- 损失函数：`torch.nn.CrossEntropyLoss`
-- 指标：Accuracy（Top-1），可选 Top-k
-- 数据增强（训练集）：RandomRotation / RandomAffine / ColorJitter（谨慎）/ RandomInvert（视数据而定）
-- 学习率调度：StepLR / CosineAnnealingLR（可选）
-- 保存最优模型：按 val accuracy 最高保存 `best.pth`
-
----
-
-## 12. License
-
-MIT License
-
----
-
-## 13. 致谢
-
-- PyTorch / torchvision
-- OpenCV / PIL
-- 相关古文字资料来源与整理者（按你的数据来源补充）
+This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
