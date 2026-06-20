@@ -1,0 +1,55 @@
+# Python cache and build artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Local IDE/editor settings
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS metadata
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Datasets and generated label files
+data/*
+!data/.gitkeep
+
+# Model checkpoints and exported weights
+checkpoints/*
+!checkpoints/.gitkeep
+*.pt
+*.pth
+*.ckpt
+*.onnx
+
+# Training, evaluation, and inference outputs
+outputs/*
+!outputs/.gitkeep
+runs/
+wandb/
+mlruns/
+
+# Local logs and temporary files
+*.log
+*.tmp
+*.temp
+tmp/
+temp/
